@@ -1,0 +1,16 @@
+{
+  "name": "whiteboard-app",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "concurrently \"yarn workspace client dev\" \"yarn workspace server dev\"",
+    "dev2": "turbo run dev --parallel"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2",
+    "turbo": "^2.5.3"
+  },
+  "packageManager": "yarn@1.22.22"
+}
