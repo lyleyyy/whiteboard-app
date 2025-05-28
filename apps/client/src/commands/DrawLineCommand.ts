@@ -1,8 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
 import type { LineInterface } from "../types/LineInterface";
-import type { Command } from "./types";
+import type { DrawCommand } from "./types";
+import { v4 as uuidv4 } from "uuid";
 
-export class DrawLineCommand implements Command {
+export class DrawLineCommand implements DrawCommand {
+  id: string;
+  shape: "line";
+  targetShapeId: string;
   private line: LineInterface;
   private setLines: Dispatch<SetStateAction<LineInterface[]>>;
 
@@ -12,6 +16,10 @@ export class DrawLineCommand implements Command {
   ) {
     this.line = line;
     this.setLines = setLines;
+
+    this.id = uuidv4(); // 或 uuidv4() 如果你有用
+    this.shape = "line";
+    this.targetShapeId = line.id;
   }
 
   do() {
