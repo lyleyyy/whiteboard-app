@@ -6,21 +6,30 @@ import type { KonvaEventObject } from "konva/lib/Node";
 import { Stage, Layer, Line } from "react-konva";
 import { v4 as uuidv4 } from "uuid";
 import ThemeButton from "./components/ThemeButton.tsx";
-import { useSearchParams } from "react-router";
+import { NavLink, useSearchParams } from "react-router";
 import { socket } from "./lib/socketClient.ts";
+import NewRoomModal from "./components/NewRoomModal.tsx";
+import SecondaryButton from "./components/SecondaryButton.tsx";
+import type { UserCursor } from "./types/UserCursor.ts";
+import { PiCursorClickDuotone } from "react-icons/pi";
+
+const userId = uuidv4();
+const userName = "Waya";
 
 function App() {
   const [isDrawing, setIsDrawing] = useState(false);
   const [line, setLine] = useState<LineInterface | null>(null);
   const [lines, setLines] = useState<LineInterface[]>([]);
+  const [otherUserCursors, setOtherUserCursors] = useState<UserCursor[]>([]);
   const [undoStack, setUndoStack] = useState<Command[]>([]);
   const [redoStack, setRedoStack] = useState<Command[]>([]);
+  const [isNewRoomModalOpen, setIsNewRoomModalOpen] = useState<boolean>(false);
   const [searchParams, setSearchParams] = useSearchParams();
   const roomId = searchParams.get("room");
 
   useEffect(() => {
     if (searchParams) {
-      console.log(`I am in room ${roomId}`);
+      // console.log(`I am in room ${roomId}`);
       socket.emit("joinroom", roomId);
     }
   }, [searchParams, roomId]);
@@ -37,11 +46,15 @@ function App() {
               redoCommand.do();
               setUndoStack((prev) => [...prev, redoCommand]);
               setRedoStack(redoStack);
-              socket.emit("command", {
-                type: "redo",
-                shape: "line",
-                command: redoCommand,
-              });
+
+              if (roomId) {
+                socket.emit("command", {
+                  type: "redo",
+                  shape: "line",
+                  command: redoCommand,
+                  roomId,
+                });
+              }
             }
           }
         } else {
@@ -52,11 +65,15 @@ function App() {
               undoCommand.undo();
               setRedoStack((prev) => [...prev, undoCommand]);
               setUndoStack(undoStack);
-              socket.emit("command", {
-                type: "undo",
-                shape: "line",
-                command: undoCommand,
-              });
+
+              if (roomId) {
+                socket.emit("command", {
+                  type: "undo",
+                  shape: "line",
+                  command: undoCommand,
+                  roomId,
+                });
+              }
             }
           }
         }
@@ -68,11 +85,13 @@ function App() {
     return () => {
       window.removeEventListener("keydown", undoRedo);
     };
-  }, [undoStack, redoStack, lines]);
+  }, [undoStack, redoStack, lines, roomId]);
 
   // socket listener
   useEffect(() => {
     socket.on("command", (data) => {
+      if (roomId !== data.roomId) return;
+
       if (data.type === "draw") {
         if (data.shape === "line") {
           const { line } = data;
@@ -98,10 +117,19 @@ function App() {
       }
     });
 
+    socket.on("cursormove", (data) => {
+      const { newCoord, userId } = data;
+      setOtherUserCursors((prev) => [
+        ...prev.filter((otherUserCursor) => otherUserCursor.userId !== userId),
+        { userId, coord: newCoord, userName },
+      ]);
+    });
+
     return () => {
       socket.off("command");
+      socket.off("cursormove");
     };
-  }, []);
+  }, [roomId]);
 
   function handleMouseDown() {
     setIsDrawing(true);
@@ -122,21 +150,36 @@ function App() {
     const newCoord = e.target.getStage()?.getPointerPosition();
     if (!newCoord) return;
 
-    const newLine = {
-      id: line?.id || uuidv4(),
-      points: [...(line?.points ?? []), newCoord.x, newCoord.y],
-      stroke: "blacks",
-      strokeWidth: 2,
-    };
-
     if (isDrawing) {
+      const newLine = {
+        id: line?.id || uuidv4(),
+        points: [...(line?.points ?? []), newCoord.x, newCoord.y],
+        stroke: "blacks",
+        strokeWidth: 2,
+      };
+
       setLine(newLine);
 
       // socket io emits event
       // socket.emit("drawline", newLine);
-      socket.emit("command", { type: "draw", shape: "line", line: newLine });
+      if (roomId) {
+        socket.emit("command", {
+          type: "draw",
+          shape: "line",
+          line: newLine,
+          roomId,
+        });
+      }
       // throttledEmit(newLine);
     }
+
+    // mouse move cursor
+    socket.emit("cursormove", {
+      newCoord,
+      roomId,
+      userId,
+      userName,
+    });
   }
 
   function handleNewRoom(e: React.MouseEvent<HTMLButtonElement>) {
@@ -146,15 +189,54 @@ function App() {
     const newRoomId = uuidv4();
     params.set("room", newRoomId);
     setSearchParams(params);
+
+    setIsNewRoomModalOpen(true);
   }
 
   return (
     <>
-      <ThemeButton
-        positionCss="absolute right-5 top-5"
-        buttonName="New Room"
-        onClick={(e) => handleNewRoom(e)}
-      />
+      {otherUserCursors.length !== 0 &&
+        otherUserCursors.map((userCursor) => {
+          const { coord, userName } = userCursor;
+          if (userId !== userCursor.userId) {
+            const { x, y } = coord;
+
+            return (
+              <span
+                key={userCursor.userId}
+                className={`absolute flex`}
+                style={{ left: `${x}px`, top: `${y}px` }}
+              >
+                <PiCursorClickDuotone />
+                <p className="text-sm">{userName}</p>
+              </span>
+            );
+          }
+        })}
+      {isNewRoomModalOpen && roomId && (
+        <NewRoomModal
+          roomId={roomId}
+          onClick={() => setIsNewRoomModalOpen(false)}
+        />
+      )}
+
+      {!roomId && (
+        <ThemeButton
+          positionCss="absolute right-5 top-5"
+          buttonName="New Room"
+          onClick={(e) => handleNewRoom(e)}
+        />
+      )}
+
+      {roomId && (
+        <NavLink to="/">
+          <SecondaryButton
+            positionCss="absolute right-5 top-5"
+            buttonName="Leave Room"
+          />
+        </NavLink>
+      )}
+
       <Stage
         width={window.innerWidth}
         height={window.innerHeight}
